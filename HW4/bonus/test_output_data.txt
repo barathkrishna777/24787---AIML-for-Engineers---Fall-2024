@@ -1,0 +1,143 @@
+#ifndef RK4_H
+#define RK4_H
+
+// Eigen
+#include <Eigen/Core>
+#include <Eigen/Dense>
+
+const double L = 0.48;
+const double dt = 0.01;
+
+template<int state_dim, int control_dim>
+class RK4 {
+
+    public:
+
+    // Dynamics function f
+    Eigen::Matrix<double, state_dim, 1> dynamics(Eigen::Matrix<double, state_dim, 1> state, Eigen::Matrix<double, control_dim, 1> control) {
+        double dx = state(3) * std::cos(state(2));
+        double dy = state(3) * std::sin(state(2));
+        double dtheta = state(3) * std::tan(control(0)) / L;
+        double dv = control(1);
+
+        Eigen::Matrix<double, state_dim, 1> dstate;
+        dstate(0) =  dx;
+        dstate(1) = dy;
+        dstate(2) = dtheta;
+        dstate(3) = dv;
+
+        return dstate;
+    }
+
+
+    // A matrix using RK4 (df/dx)
+    Eigen::Matrix<double, state_dim, state_dim> dk1_dx(const Eigen::Matrix<double, state_dim, 1> &state, const Eigen::Matrix<double, control_dim, 1> &control) {
+        double v = state(3);
+        double theta = state(2);
+        double delta = control(0);
+
+        Eigen::Matrix<double, state_dim, state_dim> jacobian = Eigen::Matrix<double, state_dim, state_dim>::Zero();
+        jacobian(0, 2) = -v * std::sin(theta); // ∂dx/∂theta
+        jacobian(0, 3) = std::cos(theta);      // ∂dx/∂v
+        jacobian(1, 2) = v * std::cos(theta);  // ∂dy/∂theta
+        jacobian(1, 3) = std::sin(theta);      // ∂dy/∂v
+        jacobian(2, 3) = std::tan(delta) / L;  // ∂dtheta/∂v
+
+        return jacobian;
+    }
+
+
+    Eigen::Matrix<double, state_dim, state_dim> dk2_dx(const Eigen::Matrix<double, state_dim, 1> &state, const Eigen::Matrix<double, control_dim, 1> &control, const Eigen::Matrix<double, state_dim, 1> &k1) {
+        Eigen::Matrix<double, state_dim, 1> new_state = state + 0.5 * dt * k1;
+        return dk1_dx(new_state, control);
+    }
+
+
+    Eigen::Matrix<double, state_dim, state_dim> dk3_dx(const Eigen::Matrix<double, state_dim, 1> &state, const Eigen::Matrix<double, control_dim, 1> &control, const Eigen::Matrix<double, state_dim, 1> &k2) {
+        Eigen::Matrix<double, state_dim, 1> new_state = state + 0.5 * dt * k2;
+        return dk1_dx(new_state, control);
+    }
+
+    Eigen::Matrix<double, state_dim, state_dim> dk4_dx(const Eigen::Matrix<double, state_dim, 1> &state, const Eigen::Matrix<double, control_dim, 1> &control, const Eigen::Matrix<double, state_dim, 1> &k3) {
+        Eigen::Matrix<double, state_dim, 1> new_state = state + dt * k3;
+        return dk1_dx(new_state, control);
+    }
+
+
+    Eigen::Matrix<double, state_dim, state_dim> dfdx(const Eigen::Matrix<double, state_dim, 1> &state, const Eigen::Matrix<double, control_dim, 1> &control) {
+        Eigen::Matrix<double, state_dim, 1> k1 = this->dynamics(state, control);
+        Eigen::Matrix<double, state_dim, state_dim> dk1 = this->dk1_dx(state, control);
+
+        Eigen::Matrix<double, state_dim, 1> k2 = this->dynamics(state + 0.5 * dt * k1, control);
+        Eigen::Matrix<double, state_dim, state_dim> dk2 = this->dk2_dx(state, control, k1);
+
+        Eigen::Matrix<double, state_dim, 1> k3 = this->dynamics(state + 0.5 * dt * k2, control);
+        Eigen::Matrix<double, state_dim, state_dim> dk3 = this->dk3_dx(state, control, k2);
+
+        Eigen::Matrix<double, state_dim, 1> k4 = this->dynamics(state + dt * k3, control);
+        Eigen::Matrix<double, state_dim, state_dim> dk4 = this->dk4_dx(state, control, k3);
+
+        Eigen::Matrix<double, state_dim, state_dim> jacobian = (dt / 6.0) * (dk1 + 2 * dk2 + 2 * dk3 + dk4);
+
+        return jacobian;
+    }
+
+    Eigen::Matrix<double, state_dim, state_dim> dfdx_discretized(const Eigen::Matrix<double, state_dim, 1> &state, const Eigen::Matrix<double, control_dim, 1> &control) {
+        Eigen::Matrix<double, state_dim, state_dim> jacobian = dfdx(state, control);
+        Eigen::Matrix<double, state_dim, state_dim> identity = Eigen::Matrix<double, state_dim, state_dim>::Identity();
+        return jacobian + identity;
+    }
+
+
+    // B matrix using RK4 (df/du)
+    Eigen::Matrix<double, state_dim, control_dim> dk1_du(const Eigen::Matrix<double, state_dim, 1> &state, const Eigen::Matrix<double, control_dim, 1> &control) {
+        double v = state(3);
+        double theta = state(2);
+        double delta = control(0);
+
+        Eigen::Matrix<double, state_dim, control_dim> jacobian = Eigen::Matrix<double, state_dim, control_dim>::Zero();
+        jacobian(2, 0) = (v / (L * std::cos(delta) * std::cos(delta))); // ∂dtheta/∂delta
+        jacobian(3, 1) = 1.0;                                          // ∂dv/∂acceleration
+
+        return jacobian;
+    }
+
+
+    Eigen::Matrix<double, state_dim, control_dim> dk2_du(const Eigen::Matrix<double, state_dim, 1> &state, const Eigen::Matrix<double, control_dim, 1> &control, const Eigen::Matrix<double, state_dim, 1> &k1) {
+        Eigen::Matrix<double, state_dim, 1> new_state = state + 0.5 * dt * k1;
+        return dk1_du(new_state, control);
+    }
+
+
+    Eigen::Matrix<double, state_dim, control_dim> dk3_du(const Eigen::Matrix<double, state_dim, 1> &state, const Eigen::Matrix<double, control_dim, 1> &control, const Eigen::Matrix<double, state_dim, 1> &k2) {
+        Eigen::Matrix<double, state_dim, 1> new_state = state + 0.5 * dt * k2;
+        return dk1_du(new_state, control);
+    }
+
+    Eigen::Matrix<double, state_dim, control_dim> dk4_du(const Eigen::Matrix<double, state_dim, 1> &state, const Eigen::Matrix<double, control_dim, 1> &control, const Eigen::Matrix<double, state_dim, 1> &k3) {
+        Eigen::Matrix<double, state_dim, 1> new_state = state + dt * k3;
+        return dk1_du(new_state, control);
+    }
+
+
+    Eigen::Matrix<double, state_dim, control_dim> dfdu(const Eigen::Matrix<double, state_dim, 1> &state, const Eigen::Matrix<double, control_dim, 1> &control) {
+        Eigen::Matrix<double, state_dim, 1> k1 = this->dynamics(state, control);
+        Eigen::Matrix<double, state_dim, control_dim> dk1 = this->dk1_du(state, control);
+
+        Eigen::Matrix<double, state_dim, 1> k2 = this->dynamics(state + 0.5 * dt * k1, control);
+        Eigen::Matrix<double, state_dim, control_dim> dk2 = this->dk2_du(state, control, k1);
+
+        Eigen::Matrix<double, state_dim, 1> k3 = this->dynamics(state + 0.5 * dt * k2, control);
+        Eigen::Matrix<double, state_dim, control_dim> dk3 = this->dk3_du(state, control, k2);
+
+        Eigen::Matrix<double, state_dim, 1> k4 = this->dynamics(state + dt * k3, control);
+        Eigen::Matrix<double, state_dim, control_dim> dk4 = this->dk4_du(state, control, k3);
+
+        Eigen::Matrix<double, state_dim, control_dim> jacobian = (dt / 6.0) * (dk1 + 2 * dk2 + 2 * dk3 + dk4);
+
+        return jacobian;
+    }
+
+}; // class RK4
+
+#endif // RK4_H
